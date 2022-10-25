@@ -1,0 +1,39 @@
+[tool.poetry]
+name = "tap-rawpostgresql"
+version = "0.0.1"
+description = "`tap-rawpostgresql` is a Singer tap for PostgreSQL, built with the Meltano Singer SDK."
+authors = ["FirstName LastName"]
+keywords = [
+    "ELT",
+    "PostgreSQL",
+]
+license = "Apache 2.0"
+
+[tool.poetry.dependencies]
+python = "<3.11,>=3.10"
+singer-sdk = "^0.12.0"
+psycopg2 = "^2.9.4"
+
+[tool.poetry.dev-dependencies]
+pytest = "^7.0.1"
+tox = "^3.24.5"
+flake8 = "^4.0.1"
+black = "^22.1"
+pydocstyle = "^6.1.1"
+mypy = "^0.931"
+types-requests = "^2.27.11"
+coverage = "^6.2"
+isort = "^5.10.1"
+
+[tool.isort]
+profile = "black"
+multi_line_output = 3 # Vertical Hanging Indent
+src_paths = "tap_rawpostgresql"
+
+[build-system]
+requires = ["poetry-core>=1.0.8"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.scripts]
+# CLI declaration
+tap-rawpostgresql = 'tap_rawpostgresql.tap:TapRawPostgreSQL.cli'

@@ -1,0 +1,65 @@
+version: 1
+send_anonymous_usage_stats: true
+project_id: tap-rawpostgresql
+default_environment: test
+environments:
+- name: test
+  config:
+    plugins:
+      extractors:
+      - name: tap-rawpostgresql
+        select:
+        - '*.*'
+plugins:
+  extractors:
+  - name: tap-rawpostgresql
+    namespace: tap_rawpostgresql
+    pip_url: -e .
+    capabilities:
+    - state
+    - catalog
+    - discover
+    - about
+    - stream-maps
+    - batch
+    settings:
+    - name: username
+    - name: password
+      kind: password
+    - name: host
+    - name: port
+    - name: database
+    - name: schema
+    - name: streams
+    - name: batch_size
+    - name: batch_config
+    - name: stream_maps
+    - name: stream_map_config
+    - name: flattening_enabled
+    - name: flattening_max_depth
+    config:
+      username: username
+      password: password
+      host: localhost
+      port: 5439
+      database: postgresql
+      schema: public
+      streams:
+      - name: test_stream
+        sql: |
+          select
+            'one' as first,
+            2 as second
+        key_properties:
+        - first
+        columns:
+        - name: first
+          type: text
+        - name: second
+          type: int
+          nullable: true
+
+  loaders:
+  - name: target-jsonl
+    variant: andyh1203
+    pip_url: target-jsonl
