@@ -41,8 +41,8 @@ plugins:
       username: username
       password: password
       host: localhost
-      port: 5439
-      database: postgresql
+      port: 5432
+      database: postgres
       schema: public
       streams:
       - name: test_stream

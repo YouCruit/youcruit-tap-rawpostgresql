@@ -40,7 +40,7 @@ class RawPostgreSQLConnector(SQLConnector):
         Returns:
             A newly created SQLAlchemy engine object.
         """
-        return sqlalchemy.create_engine(self.sqlalchemy_url, echo=True)
+        return sqlalchemy.create_engine(self.sqlalchemy_url, echo=False)
 
     def table_exists(self, full_table_name: str) -> bool:
         return True
