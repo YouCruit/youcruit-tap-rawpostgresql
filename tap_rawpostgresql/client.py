@@ -152,8 +152,10 @@ class RawPostgreSQLStream(Stream):
         self.stream_config = stream_config
         self.connector = connector or self.connector_class(dict(tap.config))
         super().__init__(tap, schema=schema, name=name)
+        self.primary_keys = stream_config["key_properties"]
+        self.replication_key = stream_config.get("replication_key", None)
 
-    def get_records(self, partition: Optional[dict]) -> Iterable[dict[str, Any]]:
+    def get_records(self, context: Optional[dict]) -> Iterable[dict[str, Any]]:
         """Return a generator of record-type dictionary objects.
 
         Developers may optionally add custom logic before calling the default
@@ -166,7 +168,48 @@ class RawPostgreSQLStream(Stream):
         if not sql:
             raise Exception("sql is empty: ")
 
+        is_incremental = self.replication_method == "INCREMENTAL"
+
+        rep_key = self.stream_config.get("replication_key", context)
+
+        multiparams: list[dict] = []
+
+        if is_incremental:
+            if not rep_key:
+                raise Exception(
+                    "INCREMENTAL sync not possible with a specified 'replication_key'"
+                )
+
+            rep_key_val = self.get_starting_replication_key_value(context)
+            if rep_key_val is None:
+                rep_key_val = self.stream_config.get(
+                    "replication_key_value_start", None
+                )
+
+            if rep_key_val is None:
+                raise Exception(
+                    "No value for replication key. INCREMENTAL sync not possible."
+                )
+
+            multiparams = [{"rep_key_val": rep_key_val}]
+        else:
+            rep_key_val = self.stream_config.get("replication_key_value_start", None)
+
+            if rep_key:
+                rep_key_val = self.stream_config.get(
+                    "replication_key_value_start", None
+                )
+                if rep_key_val is None:
+                    raise Exception(
+                        "'replication_key' is specified but no "
+                        "'replication_key_value_start'."
+                        " FULL_TABLE sync not possible."
+                    )
+
+                multiparams = [{"rep_key_val": rep_key_val}]
+
         for record in self.connector.connection.execute(
-            sqlalchemy.text(sql)
+            sqlalchemy.text(sql),
+            *multiparams,
         ).mappings():
             yield dict(record)

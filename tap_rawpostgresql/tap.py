@@ -73,6 +73,12 @@ class TapRawPostgreSQL(Tap):
                         required=True,
                     ),
                     th.Property(
+                        "replication_key",
+                        th.StringType,
+                        required=False,
+                        default=None,
+                    ),
+                    th.Property(
                         "sql",
                         th.StringType,
                         required=True,
@@ -159,6 +165,8 @@ class TapRawPostgreSQL(Tap):
         )
 
         key_properties = stream_config["key_properties"]
+        replication_key = stream_config.get("replication_key", None)
+        replication_method = "INCREMENTAL" if replication_key else "FULL_TABLE"
 
         table_schema = th.PropertiesList()
         for column_def in stream_config["columns"]:
@@ -169,13 +177,12 @@ class TapRawPostgreSQL(Tap):
                 th.Property(
                     name=column_name,
                     wrapped=th.CustomType(jsonschema_type),
-                    required=not is_nullable or column_name in key_properties,
+                    required=not is_nullable
+                    or column_name in key_properties
+                    or column_name == replication_key,
                 )
             )
         schema = table_schema.to_dict()
-
-        # TODO
-        replication_method = "FULL_TABLE"
 
         # Create the catalog entry object
         catalog_entry = CatalogEntry(
@@ -191,12 +198,12 @@ class TapRawPostgreSQL(Tap):
                 schema=schema,
                 replication_method=replication_method,
                 key_properties=key_properties,
-                valid_replication_keys=None,  # Must be defined by user
+                valid_replication_keys=[replication_key] if replication_key else None,
             ),
             database=None,  # Expects single-database context
             row_count=None,
             stream_alias=None,
-            replication_key=None,  # Must be defined by user
+            replication_key=replication_key,
         )
 
         return catalog_entry.to_dict()
@@ -233,24 +240,6 @@ class TapRawPostgreSQL(Tap):
             result[s.name] = s
 
         return result
-
-    @property
-    def catalog_dict(self) -> dict:
-        """Get catalog dictionary.
-
-        Returns:
-            The tap's catalog as a dict
-        """
-        if self._catalog_dict:
-            return self._catalog_dict
-
-        result: Dict[str, List[dict]] = {"streams": []}
-        result["streams"].extend(
-            [catalog for catalog, _ in self.discover_raw_sql_streams()]
-        )
-
-        self._catalog_dict = result
-        return self._catalog_dict
 
     @classproperty
     def capabilities(self) -> List[CapabilitiesEnum]:
