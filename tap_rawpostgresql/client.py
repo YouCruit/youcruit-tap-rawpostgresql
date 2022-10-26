@@ -3,13 +3,20 @@
 This includes PostgreSQLStream and PostgreSQLConnector.
 """
 
+import gzip
+import json
+import logging
 from os import PathLike
 from typing import Any, Iterable, Optional, Union
+from uuid import UUID, uuid4
 
 import singer_sdk._singerlib as singer
 import sqlalchemy  # type: ignore
 from singer_sdk import SQLConnector, Stream
+from singer_sdk.helpers._batch import BaseBatchFileEncoding, BatchConfig
+from singer_sdk.helpers._typing import conform_record_data_types
 from singer_sdk.plugin_base import PluginBase as TapBaseClass
+from singer_sdk.streams.core import lazy_chunked_generator
 
 
 class RawPostgreSQLConnector(SQLConnector):
@@ -135,6 +142,26 @@ class RawPostgreSQLConnector(SQLConnector):
         return SQLConnector.to_sql_type(jsonschema_type)
 
 
+def conform_record_data_types_and_uuid(  # noqa: C901
+    stream_name: str, record: dict[str, Any], schema: dict, logger: logging.Logger
+) -> dict[str, Any]:
+    """Translate values in record dictionary to singer-compatible data types.
+
+    Any property names not found in the schema catalog will be removed, and a
+    warning will be logged exactly once per unmapped property name.
+    """
+    rec = conform_record_data_types(
+        stream_name=stream_name, record=record, schema=schema, logger=logger
+    )
+
+    # Fix any UUIDs as well
+    for property_name, elem in record.items():
+        if isinstance(elem, UUID):
+            rec[property_name] = str(elem)
+
+    return rec
+
+
 class RawPostgreSQLStream(Stream):
     """Stream class for PostgreSQL streams."""
 
@@ -154,6 +181,50 @@ class RawPostgreSQLStream(Stream):
         super().__init__(tap, schema=schema, name=name)
         self.primary_keys = stream_config["key_properties"]
         self.replication_key = stream_config.get("replication_key", None)
+        self.batch_size = self.config.get("batch_size", 100_000)
+
+    def get_batches(
+        self,
+        batch_config: BatchConfig,
+        context: Optional[dict] = None,
+    ) -> Iterable[tuple[BaseBatchFileEncoding, list[str]]]:
+        """Batch generator function.
+
+        Developers are encouraged to override this method to customize batching
+        behavior for databases, bulk APIs, etc.
+
+        Args:
+            batch_config: Batch config for this stream.
+            context: Stream partition or context dictionary.
+
+        Yields:
+            A tuple of (encoding, manifest) for each batch.
+        """
+        sync_id = f"{self.tap_name}--{self.name}-{uuid4()}"
+        prefix = batch_config.storage.prefix or ""
+
+        for i, chunk in enumerate(
+            lazy_chunked_generator(
+                self._sync_records(context, write_messages=False),
+                self.batch_size,
+            ),
+            start=1,
+        ):
+            filename = f"{prefix}{sync_id}-{i}.json.gz"
+            with batch_config.storage.fs() as fs:
+                with fs.open(filename, "wb") as f:
+                    with gzip.GzipFile(fileobj=f, mode="wb") as gz:
+                        for record in chunk:
+                            record = conform_record_data_types_and_uuid(
+                                stream_name=self.name,
+                                record=record,
+                                schema=self.schema,
+                                logger=self.logger,
+                            )
+                            gz.write((json.dumps(record) + "\n").encode())
+                file_url = fs.geturl(filename)
+
+            yield batch_config.encoding, [file_url]
 
     def get_records(self, context: Optional[dict]) -> Iterable[dict[str, Any]]:
         """Return a generator of record-type dictionary objects.

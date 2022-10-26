@@ -1,5 +1,10 @@
 """Tests some actual SQL"""
 
+import gzip
+import json
+import os
+from urllib.parse import urlparse
+
 from sqlalchemy import create_engine
 
 from tap_rawpostgresql.tap import TapRawPostgreSQL
@@ -152,3 +157,70 @@ def test_full():
                 "three": "3",
                 "four": "4",
             }
+
+
+CONFIG_BATCH = {
+    "username": "username",
+    "password": "password",
+    "host": "localhost",
+    "port": 5432,
+    "database": "testdb",
+    "schema": "public",
+    "batch_size": 5,
+    "batch_config": {
+        "encoding": {"format": "jsonl", "compression": "gzip"},
+        "storage": {"root": "file:///tmp"},
+    },
+    "streams": [
+        {
+            "name": "test",
+            "sql": """
+                select
+                  '1441c21d-9921-4a1d-b239-9c6ea18af234'::uuid as id,
+                  timestamptz '2021-11-22T11:45:11.062824+00:00' as last_updated
+            """,
+            "key_properties": ["id"],
+            "columns": [
+                {
+                    "name": "id",
+                    "type": "string",
+                },
+                {
+                    "name": "last_updated",
+                    "type": "datetime",
+                },
+            ],
+        }
+    ],
+}
+
+
+def test_batch():
+    CONFIG = CONFIG_BATCH
+    tap = TapRawPostgreSQL(CONFIG)
+
+    for _, stream in tap.streams.items():
+        batches = list(
+            stream.get_batches(batch_config=stream.get_batch_config(stream.config))
+        )
+
+        assert len(batches) == 1
+
+        _, files = batches[0]
+
+        assert len(files) == 1
+
+        p = urlparse(files[0])
+        batchfile = os.path.abspath(os.path.join(p.netloc, p.path))
+
+        result = None
+
+        with open(batchfile, "rb") as f:
+            with gzip.GzipFile(fileobj=f, mode="rb") as gz:
+                for line in gz:
+                    result = json.loads(line)
+
+        assert result == {
+            "id": "1441c21d-9921-4a1d-b239-9c6ea18af234",
+            "last_updated": "2021-11-22T11:45:11.062824+00:00",
+        }
