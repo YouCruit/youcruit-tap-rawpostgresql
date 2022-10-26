@@ -9,8 +9,8 @@ SAMPLE_CONFIG = {
     "password": "password",
     "host": "localhost",
     "port": 5432,
-    "database": "dbname",
-    "schema": "schemaname",
+    "database": "testdb",
+    "schema": "public",
     "streams": [
         {
             "name": "test",

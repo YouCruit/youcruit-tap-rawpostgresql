@@ -40,6 +40,16 @@ jobs:
       matrix:
         python-version: ['3.9', '3.10']
 
+    services:
+      test_postgres:
+        image: postgres:14
+        env:
+          POSTGRES_USER: username
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: testdb
+        ports:
+          - 5432:5432
+
     steps:
     - uses: actions/checkout@v2
     - name: Set up Python ${{ matrix.python-version }}
