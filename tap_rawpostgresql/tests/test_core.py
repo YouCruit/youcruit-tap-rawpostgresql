@@ -9,7 +9,7 @@ SAMPLE_CONFIG = {
     "password": "password",
     "host": "localhost",
     "port": 5432,
-    "database": "testdb",
+    "database": "postgres",
     "schema": "public",
     "streams": [
         {
