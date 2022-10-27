@@ -7,7 +7,7 @@ import gzip
 import json
 import logging
 from os import PathLike
-from typing import Any, Iterable, Optional, Union
+from typing import IO, Any, Iterable, Optional, Union
 from uuid import UUID, uuid4
 
 import singer_sdk._singerlib as singer
@@ -16,7 +16,6 @@ from singer_sdk import SQLConnector, Stream
 from singer_sdk.helpers._batch import BaseBatchFileEncoding, BatchConfig
 from singer_sdk.helpers._typing import conform_record_data_types
 from singer_sdk.plugin_base import PluginBase as TapBaseClass
-from singer_sdk.streams.core import lazy_chunked_generator
 
 
 class RawPostgreSQLConnector(SQLConnector):
@@ -203,28 +202,47 @@ class RawPostgreSQLStream(Stream):
         sync_id = f"{self.tap_name}--{self.name}-{uuid4()}"
         prefix = batch_config.storage.prefix or ""
 
-        for i, chunk in enumerate(
-            lazy_chunked_generator(
-                self._sync_records(context, write_messages=False),
-                self.batch_size,
-            ),
-            start=1,
-        ):
-            filename = f"{prefix}{sync_id}-{i}.json.gz"
-            with batch_config.storage.fs() as fs:
-                with fs.open(filename, "wb") as f:
-                    with gzip.GzipFile(fileobj=f, mode="wb") as gz:
-                        for record in chunk:
-                            record = conform_record_data_types_and_uuid(
-                                stream_name=self.name,
-                                record=record,
-                                schema=self.schema,
-                                logger=self.logger,
-                            )
-                            gz.write((json.dumps(record) + "\n").encode())
-                file_url = fs.geturl(filename)
+        i = 1
+        chunk_size = 0
+        filename: Optional[str] = None
+        f: Optional[IO] = None
+        gz: Optional[gzip.GzipFile] = None
 
-            yield batch_config.encoding, [file_url]
+        with batch_config.storage.fs() as fs:
+            for record in self._sync_records(context, write_messages=False):
+                if filename is None:
+                    filename = f"{prefix}{sync_id}-{i}.json.gz"
+                    f = fs.open(filename, "wb")
+                    gz = gzip.GzipFile(fileobj=f, mode="wb")
+
+                record = conform_record_data_types_and_uuid(
+                    stream_name=self.name,
+                    record=record,
+                    schema=self.schema,
+                    logger=self.logger,
+                )
+
+                gz.write((json.dumps(record) + "\n").encode())
+                chunk_size += 1
+
+                if chunk_size >= self.batch_size:
+                    gz.close()
+                    gz = None
+                    f.close()
+                    f = None
+                    file_url = fs.geturl(filename)
+                    yield batch_config.encoding, [file_url]
+
+                    filename = None
+
+                    i += 1
+                    chunk_size = 0
+
+            if chunk_size > 0:
+                gz.close()
+                f.close()
+                file_url = fs.geturl(filename)
+                yield batch_config.encoding, [file_url]
 
     def get_records(self, context: Optional[dict]) -> Iterable[dict[str, Any]]:
         """Return a generator of record-type dictionary objects.
